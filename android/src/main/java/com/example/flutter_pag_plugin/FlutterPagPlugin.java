@@ -260,6 +260,10 @@ public class FlutterPagPlugin implements FlutterPlugin, MethodCallHandler {
         final FlutterPagPlayer pagPlayer;
         final String currentId;
         if (freeEntryPool.isEmpty() || !useCache) {
+            if (textureRegistry == null) {
+                error(call, result, "-10001", "textureRegistry is null " + call.argument(_argumentAssetName), null);
+                return;
+            }
             pagPlayer = new FlutterPagPlayer();
             final TextureRegistry.SurfaceTextureEntry entry = textureRegistry.createSurfaceTexture();
             currentId = String.valueOf(entry.id());
@@ -412,5 +416,6 @@ public class FlutterPagPlugin implements FlutterPlugin, MethodCallHandler {
     @Override
     public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
         onDestroy();
+        textureRegistry = null;
     }
 }

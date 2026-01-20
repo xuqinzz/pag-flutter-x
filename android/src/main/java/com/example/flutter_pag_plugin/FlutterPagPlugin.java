@@ -261,7 +261,7 @@ public class FlutterPagPlugin implements FlutterPlugin, MethodCallHandler {
         final String currentId;
         if (freeEntryPool.isEmpty() || !useCache) {
             if (textureRegistry == null) {
-                error(call, result, "-10001", "textureRegistry is null " + call.argument(_argumentAssetName), null);
+                result.error("-10001", "textureRegistry is null " + call.argument(_argumentAssetName), null);
                 return;
             }
             pagPlayer = new FlutterPagPlayer();

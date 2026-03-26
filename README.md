@@ -68,6 +68,57 @@ PAGView.asset(
     },
 ```
 
+### 动态替换图片图层
+
+PAG 文件中的可编辑图片图层可在初始化时通过 `images` 参数替换，列表下标对应 PAGFile 中可编辑图片的顺序（0-based），传 `null` 表示跳过该位置。
+
+```dart
+PAGView.asset(
+  "assets/xxx.pag",
+  images: [
+    PAGImageEdit(imageBytes),  // 替换第 0 个可编辑图片图层
+    null,                       // 跳过第 1 个
+    PAGImageEdit(otherBytes),  // 替换第 2 个
+  ],
+)
+```
+
+`PAGImageEdit` 接受 `Uint8List?` 类型，支持 JPEG、PNG、WebP 等常见格式的二进制数据。
+
+### 动态替换文字图层
+
+PAG 文件中的可编辑文字图层可在初始化时通过 `texts` 参数替换，列表下标对应 PAGFile 中可编辑文字的顺序（0-based），传 `null` 表示跳过该位置。
+
+```dart
+PAGView.asset(
+  "assets/xxx.pag",
+  texts: [
+    PAGTextEdit(
+      text: '替换文字',         // 文字内容
+      fontSize: 24,             // 字号（可选）
+      fillColor: 0xFFFF0000,    // 填充色，0xAARRGGBB 格式（可选）
+      strokeColor: 0xFF000000,  // 描边色，0xAARRGGBB 格式（可选）
+      fontFamily: 'PingFang SC', // 字体（可选）
+      fontStyle: 'Bold',         // 字体样式（可选）
+    ),
+    null,  // 跳过第 1 个
+  ],
+)
+```
+
+所有字段均为可选，仅传入需要修改的属性即可，未设置的属性保持 PAG 文件中的原始值。
+
+### 同时替换图片和文字
+
+```dart
+PAGView.asset(
+  "assets/xxx.pag",
+  autoPlay: true,
+  images: [PAGImageEdit(avatarBytes)],
+  texts: [PAGTextEdit(text: '用户昵称', fillColor: 0xFFFFFFFF)],
+)
+```
+
 ### 通过key获取state进行主动调用
 ```
   final GlobalKey<PAGViewState> pagKey = GlobalKey<PAGViewState>();

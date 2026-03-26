@@ -84,8 +84,54 @@ static int64_t GetCurrentTimeUS() {
     return target;
 }
 
+- (UIColor *)colorFromARGB:(NSInteger)argb {
+    return [UIColor colorWithRed:((argb >> 16) & 0xFF) / 255.0
+                           green:((argb >> 8) & 0xFF) / 255.0
+                            blue:(argb & 0xFF) / 255.0
+                           alpha:1.0];
+}
+
+- (void)applyImageEdits:(NSArray *)images {
+    if (!images || images.count == 0 || !_pagFile) return;
+    for (NSUInteger idx = 0; idx < images.count; idx++) {
+        if ((int)idx >= [_pagFile numImages]) break;
+        id rawBytes = images[idx];
+        if (rawBytes == NSNull.null || ![rawBytes isKindOfClass:FlutterStandardTypedData.class]) continue;
+        NSData *imageData = ((FlutterStandardTypedData *)rawBytes).data;
+        PAGImage *pagImage = [PAGImage FromBytes:imageData.bytes size:imageData.length];
+        if (pagImage) {
+            [_pagFile replaceImage:(int)idx data:pagImage];
+        }
+    }
+}
+
+- (void)applyTextEdits:(NSArray *)texts {
+    if (!texts || texts.count == 0 || !_pagFile) return;
+    for (NSUInteger idx = 0; idx < texts.count; idx++) {
+        if ((int)idx >= [_pagFile numTexts]) break;
+        id item = texts[idx];
+        if (item == NSNull.null || ![item isKindOfClass:NSDictionary.class]) continue;
+        NSDictionary *map = (NSDictionary *)item;
+        PAGText *pagText = [_pagFile getTextData:(int)idx];
+        if (!pagText) continue;
+        if ([map[@"text"] isKindOfClass:NSString.class]) pagText.text = map[@"text"];
+        if (map[@"fontSize"] && map[@"fontSize"] != NSNull.null) pagText.fontSize = [map[@"fontSize"] floatValue];
+        if (map[@"fillColor"] && map[@"fillColor"] != NSNull.null) {
+            pagText.fillColor = [self colorFromARGB:[map[@"fillColor"] integerValue]];
+        }
+        if (map[@"strokeColor"] && map[@"strokeColor"] != NSNull.null) {
+            pagText.strokeColor = [self colorFromARGB:[map[@"strokeColor"] integerValue]];
+        }
+        if ([map[@"fontFamily"] isKindOfClass:NSString.class]) pagText.fontFamily = map[@"fontFamily"];
+        if ([map[@"fontStyle"] isKindOfClass:NSString.class]) pagText.fontStyle = map[@"fontStyle"];
+        [_pagFile replaceText:(int)idx data:pagText];
+    }
+}
+
 - (instancetype)initWithPagData:(NSData*)pagData
                        progress:(double)initProgress
+                         images:(nullable NSArray*)images
+                          texts:(nullable NSArray*)texts
             frameUpdateCallback:(FrameUpdateCallback)frameUpdateCallback
                   eventCallback:(PAGEventCallback)eventCallback
 {
@@ -97,6 +143,8 @@ static int64_t GetCurrentTimeUS() {
             _pagFile = [PAGFile Load:pagData.bytes size:pagData.length];
             _player = [[PAGPlayer alloc] init];
             [_player setComposition:_pagFile];
+            [self applyImageEdits:images];
+            [self applyTextEdits:texts];
             _surface = [PAGSurface MakeFromGPU:CGSizeMake(_pagFile.width, _pagFile.height)];
             [_player setSurface:_surface];
             [_player setProgress:initProgress];
@@ -105,6 +153,19 @@ static int64_t GetCurrentTimeUS() {
         }
     }
     return self;
+}
+
+- (instancetype)initWithPagData:(NSData*)pagData
+                       progress:(double)initProgress
+            frameUpdateCallback:(FrameUpdateCallback)frameUpdateCallback
+                  eventCallback:(PAGEventCallback)eventCallback
+{
+    return [self initWithPagData:pagData
+                        progress:initProgress
+                          images:nil
+                           texts:nil
+             frameUpdateCallback:frameUpdateCallback
+                   eventCallback:eventCallback];
 }
 
 - (void)startRender

@@ -137,6 +137,11 @@
         autoPlay = [[arguments objectForKey:@"autoPlay"] boolValue];
     }
     
+    NSArray *images = arguments[@"images"];
+    if (images == (id)NSNull.null) images = nil;
+    NSArray *texts = arguments[@"texts"];
+    if (texts == (id)NSNull.null) texts = nil;
+
     NSString* assetName = arguments[@"assetName"];
     NSData *pagData = nil;
     if ([assetName isKindOfClass:NSString.class] && assetName.length > 0) {
@@ -152,12 +157,12 @@
             }
 
             resourcePath = [[NSBundle mainBundle] pathForResource:resourcePath ofType:nil];
-            
+
             pagData = [NSData dataWithContentsOfFile:resourcePath];
             [self setCacheData:key data:pagData];
-            
+
         }
-        [self pagRenderWithPagData:pagData progress:initProgress repeatCount:repeatCount autoPlay:autoPlay result:result];
+        [self pagRenderWithPagData:pagData progress:initProgress repeatCount:repeatCount autoPlay:autoPlay images:images texts:texts result:result];
     }
     NSString* url = arguments[@"url"];
     if ([url isKindOfClass:NSString.class] && url.length > 0) {
@@ -170,21 +175,21 @@
             [TGFlutterPagDownloadManager download:url completionHandler:^(NSData * _Nonnull data, NSError * _Nonnull error) {
                 if (data) {
                     [weak_self setCacheData:key data:pagData];
-                    [weak_self pagRenderWithPagData:data progress:initProgress repeatCount:repeatCount autoPlay:autoPlay result:result];
+                    [weak_self pagRenderWithPagData:data progress:initProgress repeatCount:repeatCount autoPlay:autoPlay images:images texts:texts result:result];
                 }else{
                     result(@-1);
                 }
             }];
         }else{
-            [self pagRenderWithPagData:pagData progress:initProgress repeatCount:repeatCount autoPlay:autoPlay result:result];
+            [self pagRenderWithPagData:pagData progress:initProgress repeatCount:repeatCount autoPlay:autoPlay images:images texts:texts result:result];
         }
     }
-    
+
     id bytesData = arguments[@"bytesData"];
     if(bytesData != nil && [bytesData isKindOfClass:FlutterStandardTypedData.class]){
         FlutterStandardTypedData *typedData = bytesData;
         if(typedData.type == FlutterStandardDataTypeUInt8 && typedData.data != nil){
-            [self pagRenderWithPagData:typedData.data progress:initProgress repeatCount:repeatCount autoPlay:autoPlay result:result];
+            [self pagRenderWithPagData:typedData.data progress:initProgress repeatCount:repeatCount autoPlay:autoPlay images:images texts:texts result:result];
         }else{
             result(@-1);
         }
@@ -215,10 +220,10 @@
     }
 }
 
--(void)pagRenderWithPagData:(NSData *)pagData progress:(double)progress repeatCount:(int)repeatCount autoPlay:(BOOL)autoPlay result:(FlutterResult)result{
+-(void)pagRenderWithPagData:(NSData *)pagData progress:(double)progress repeatCount:(int)repeatCount autoPlay:(BOOL)autoPlay images:(nullable NSArray*)images texts:(nullable NSArray*)texts result:(FlutterResult)result{
     __block int64_t textureId = -1;
     __weak typeof(self) weakSelf = self;
-    TGFlutterPagRender *render = [[TGFlutterPagRender alloc] initWithPagData:pagData progress:progress frameUpdateCallback:^{
+    TGFlutterPagRender *render = [[TGFlutterPagRender alloc] initWithPagData:pagData progress:progress images:images texts:texts frameUpdateCallback:^{
          [weakSelf.textures textureFrameAvailable:textureId];
     } eventCallback:^(NSString * event) {
         [weakSelf.channel invokeMethod:PlayCallback arguments:@{ArgumentTextureId:@(textureId), ArgumentEvent:event}];

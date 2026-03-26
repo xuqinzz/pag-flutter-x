@@ -1,6 +1,53 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+/// 图片图层替换数据，列表下标对应 PAGFile 可编辑图像的 index
+class PAGImageEdit {
+  /// 图片二进制数据（JPEG/PNG/WebP 等格式），传 null 表示跳过该位置
+  final Uint8List? bytes;
+
+  const PAGImageEdit(this.bytes);
+}
+
+/// 文字图层替换数据，列表下标对应 PAGFile 可编辑文字的 index
+class PAGTextEdit {
+  /// 替换的文字内容，传 null 表示跳过该位置
+  final String? text;
+
+  /// 字号（可选），单位 px
+  final double? fontSize;
+
+  /// 填充色（可选），0xAARRGGBB 格式
+  final int? fillColor;
+
+  /// 描边色（可选），0xAARRGGBB 格式
+  final int? strokeColor;
+
+  /// 字体 family（可选）
+  final String? fontFamily;
+
+  /// 字体 style（可选），如 "Bold"、"Italic"
+  final String? fontStyle;
+
+  const PAGTextEdit({
+    this.text,
+    this.fontSize,
+    this.fillColor,
+    this.strokeColor,
+    this.fontFamily,
+    this.fontStyle,
+  });
+
+  Map<String, Object?> toMap() => {
+        if (text != null) 'text': text,
+        if (fontSize != null) 'fontSize': fontSize,
+        if (fillColor != null) 'fillColor': fillColor,
+        if (strokeColor != null) 'strokeColor': strokeColor,
+        if (fontFamily != null) 'fontFamily': fontFamily,
+        if (fontStyle != null) 'fontStyle': fontStyle,
+      };
+}
+
 class PAGView extends StatefulWidget {
   /// 宽高，不建议不设置
   final double? width;
@@ -45,6 +92,12 @@ class PAGView extends StatefulWidget {
   /// 加载失败时的默认控件构造器
   final Widget Function(BuildContext context)? defaultBuilder;
 
+  /// 初始化时替换的图片图层列表（可选）
+  final List<PAGImageEdit>? images;
+
+  /// 初始化时替换的文字图层列表（可选）
+  final List<PAGTextEdit>? texts;
+
   static const int REPEAT_COUNT_LOOP = -1; //无限循环
   static const int REPEAT_COUNT_DEFAULT = 1; //默认仅播放一次
 
@@ -61,6 +114,8 @@ class PAGView extends StatefulWidget {
     this.onAnimationCancel,
     this.onAnimationRepeat,
     this.defaultBuilder,
+    this.images,
+    this.texts,
     Key? key,
   })  : this.bytesData = null,
         this.assetName = null,
@@ -81,6 +136,8 @@ class PAGView extends StatefulWidget {
     this.onAnimationCancel,
     this.onAnimationRepeat,
     this.defaultBuilder,
+    this.images,
+    this.texts,
     Key? key,
   })  : this.bytesData = null,
         this.url = null,
@@ -100,6 +157,8 @@ class PAGView extends StatefulWidget {
     this.onAnimationCancel,
     this.onAnimationRepeat,
     this.defaultBuilder,
+    this.images,
+    this.texts,
     Key? key,
   })  : this.url = null,
         this.assetName = null,
@@ -148,6 +207,8 @@ class PAGViewState extends State<PAGView> {
   static const String _argumentCacheEnabled = "cacheEnabled";
   static const String _argumentCacheSize = "cacheSize";
   static const String _argumentMultiThreadEnabled = "multiThreadEnabled";
+  static const String _argumentImages = "images";
+  static const String _argumentTexts = "texts";
 
   // 监听该函数
   static const String _playCallback = 'PAGCallback';
@@ -182,7 +243,7 @@ class PAGViewState extends State<PAGView> {
 
     try {
       dynamic result =
-          await _channel.invokeMethod(_nativeInit, {_argumentAssetName: widget.assetName, _argumentPackage: widget.package, _argumentUrl: widget.url, _argumentBytes: widget.bytesData, _argumentRepeatCount: repeatCount, _argumentInitProgress: initProcess, _argumentAutoPlay: widget.autoPlay});
+          await _channel.invokeMethod(_nativeInit, {_argumentAssetName: widget.assetName, _argumentPackage: widget.package, _argumentUrl: widget.url, _argumentBytes: widget.bytesData, _argumentRepeatCount: repeatCount, _argumentInitProgress: initProcess, _argumentAutoPlay: widget.autoPlay, _argumentImages: widget.images?.map((e) => e.bytes).toList(), _argumentTexts: widget.texts?.map((e) => e.toMap()).toList()});
       if (result is Map) {
         _textureId = result[_argumentTextureId];
         rawWidth = result[_argumentWidth] ?? 0;

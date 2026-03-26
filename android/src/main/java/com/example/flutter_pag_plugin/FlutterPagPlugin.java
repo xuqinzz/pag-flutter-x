@@ -10,8 +10,10 @@ import android.view.Surface;
 import androidx.annotation.NonNull;
 
 import org.libpag.PAGFile;
+import org.libpag.PAGImage;
 import org.libpag.PAGLayer;
 import org.libpag.PAGSurface;
+import org.libpag.PAGText;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -82,6 +84,8 @@ public class FlutterPagPlugin implements FlutterPlugin, MethodCallHandler {
     final static String _argumentCacheEnabled = "cacheEnabled";
     final static String _argumentCacheSize = "cacheSize";
     final static String _argumentMultiThreadEnabled = "multiThreadEnabled";
+    final static String _argumentImages = "images";
+    final static String _argumentTexts = "texts";
 
     // 回调
     final static String _playCallback = "PAGCallback";
@@ -257,6 +261,8 @@ public class FlutterPagPlugin implements FlutterPlugin, MethodCallHandler {
         final int repeatCount = call.argument(_argumentRepeatCount);
         final double initProgress = call.argument(_argumentInitProgress);
         final boolean autoPlay = call.argument(_argumentAutoPlay);
+        final List<Object> imagesList = call.argument(_argumentImages);
+        final List<Object> textsList = call.argument(_argumentTexts);
         final FlutterPagPlayer pagPlayer;
         final String currentId;
         if (freeEntryPool.isEmpty() || !useCache) {
@@ -291,6 +297,38 @@ public class FlutterPagPlugin implements FlutterPlugin, MethodCallHandler {
         WorkThreadExecutor.getInstance().post(() -> {
             pagPlayer.updateBufferSize(composition.width(), composition.height());
             pagPlayer.init(composition, repeatCount, initProgress, channel, Long.parseLong(currentId));
+
+            if (imagesList != null) {
+                for (int idx = 0; idx < imagesList.size(); idx++) {
+                    if (idx >= composition.numImages()) break;
+                    Object rawBytes = imagesList.get(idx);
+                    if (!(rawBytes instanceof byte[])) continue;
+                    PAGImage pagImage = PAGImage.FromBytes((byte[]) rawBytes);
+                    if (pagImage != null) {
+                        composition.replaceImage(idx, pagImage);
+                    }
+                }
+            }
+
+            if (textsList != null) {
+                for (int idx = 0; idx < textsList.size(); idx++) {
+                    if (idx >= composition.numTexts()) break;
+                    Object item = textsList.get(idx);
+                    if (!(item instanceof Map)) continue;
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> map = (Map<String, Object>) item;
+                    PAGText pagText = composition.getTextData(idx);
+                    if (pagText == null) continue;
+                    if (map.get("text") instanceof String) pagText.text = (String) map.get("text");
+                    if (map.get("fontSize") instanceof Number) pagText.fontSize = ((Number) map.get("fontSize")).floatValue();
+                    if (map.get("fillColor") instanceof Number) pagText.fillColor = ((Number) map.get("fillColor")).intValue();
+                    if (map.get("strokeColor") instanceof Number) pagText.strokeColor = ((Number) map.get("strokeColor")).intValue();
+                    if (map.get("fontFamily") instanceof String) pagText.fontFamily = (String) map.get("fontFamily");
+                    if (map.get("fontStyle") instanceof String) pagText.fontStyle = (String) map.get("fontStyle");
+                    composition.replaceText(idx, pagText);
+                }
+            }
+
             final HashMap<String, Object> callback = new HashMap<String, Object>();
             callback.put(_argumentTextureId, Long.parseLong(currentId));
             callback.put(_argumentWidth, (double) composition.width());

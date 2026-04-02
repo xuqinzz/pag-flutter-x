@@ -142,13 +142,19 @@ static int64_t GetCurrentTimeUS() {
         if(pagData){
             _pagFile = [PAGFile Load:pagData.bytes size:pagData.length];
             _player = [[PAGPlayer alloc] init];
-            [_player setComposition:_pagFile];
             [self applyImageEdits:images];
             [self applyTextEdits:texts];
+            // 文字/图片替换完成后再绑定 composition，确保 PAG 内部 layout 包含最新替换内容
+            [_player setComposition:_pagFile];
             _surface = [PAGSurface MakeFromGPU:CGSizeMake(_pagFile.width, _pagFile.height)];
             [_player setSurface:_surface];
             [_player setProgress:initProgress];
             [_player flush];
+            // 有文字/图片替换时，部分设备首帧第一个文字图层右上角会被旧 clip 截断
+            // 需额外 flush 一次，让 PAG 用稳定的 layout 重新渲染
+            if ((images && images.count > 0) || (texts && texts.count > 0)) {
+                [_player flush];
+            }
             _frameUpdateCallback();
         }
     }

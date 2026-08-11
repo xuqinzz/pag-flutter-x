@@ -37,6 +37,13 @@ typedef void(^PAGEventCallback)(NSString *);
             frameUpdateCallback:(FrameUpdateCallback)frameUpdateCallback
                   eventCallback:(PAGEventCallback)eventCallback;
 
+- (instancetype)initWithPagData:(NSData*)pagData
+                       progress:(double)initProgress
+                         images:(nullable NSArray*)images
+                          texts:(nullable NSArray*)texts
+            frameUpdateCallback:(FrameUpdateCallback)frameUpdateCallback
+                  eventCallback:(PAGEventCallback)eventCallback;
+
 - (void)startRender;
 
 - (void)stopRender;

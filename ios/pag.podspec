@@ -17,7 +17,7 @@ A new Flutter plugin.
   s.public_header_files = 'Classes/**/*.h'
   s.static_framework = true
   s.dependency 'Flutter'
-  s.dependency 'libpag'
+  s.dependency 'libpag', '4.4.35'
   s.platform = :ios, '9.0'
   s.library = 'c++'
 

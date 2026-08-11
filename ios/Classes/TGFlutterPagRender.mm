@@ -7,7 +7,6 @@
 //
 
 #import "TGFlutterPagRender.h"
-#import "TGFlutterWorkerExecutor.h"
 #import <OpenGLES/EAGL.h>
 #import <OpenGLES/ES2/gl.h>
 #import <OpenGLES/ES2/glext.h>
@@ -85,48 +84,94 @@ static int64_t GetCurrentTimeUS() {
     return target;
 }
 
-- (instancetype)init
-{
-    if (self = [super init]) {
-        _textureId = @-1;
-    }
-    return self;
+- (UIColor *)colorFromARGB:(NSInteger)argb {
+    return [UIColor colorWithRed:((argb >> 16) & 0xFF) / 255.0
+                           green:((argb >> 8) & 0xFF) / 255.0
+                            blue:(argb & 0xFF) / 255.0
+                           alpha:1.0];
 }
 
-- (void)setUpWithPagData:(NSData*)pagData
-                       progress:(double)initProgress
-            frameUpdateCallback:(FrameUpdateCallback)frameUpdateCallback
-                  eventCallback:(PAGEventCallback)eventCallback
-{
-    _frameUpdateCallback = frameUpdateCallback;
-    _eventCallback = eventCallback;
-    _initProgress = initProgress;
-    if(pagData){
-        if ([[TGFlutterWorkerExecutor sharedInstance] enableMultiThread]) {
-            // 防止setup和release、dealloc并行争抢
-            @synchronized(self) {
-                if(self){
-                    [self setUpPlayerWithPagData:pagData];
-                }
-            }
-        } else{
-            [self setUpPlayerWithPagData:pagData];
+- (void)applyImageEdits:(NSArray *)images {
+    if (!images || images.count == 0 || !_pagFile) return;
+    for (NSUInteger idx = 0; idx < images.count; idx++) {
+        if ((int)idx >= [_pagFile numImages]) break;
+        id rawBytes = images[idx];
+        if (rawBytes == NSNull.null || ![rawBytes isKindOfClass:FlutterStandardTypedData.class]) continue;
+        NSData *imageData = ((FlutterStandardTypedData *)rawBytes).data;
+        PAGImage *pagImage = [PAGImage FromBytes:imageData.bytes size:imageData.length];
+        if (pagImage) {
+            [_pagFile replaceImage:(int)idx data:pagImage];
         }
     }
 }
 
-- (void) setUpPlayerWithPagData:(NSData*)pagData
-{
-    _pagFile = [PAGFile Load:pagData.bytes size:pagData.length];
-    if (!_player) {
-        _player = [[PAGPlayer alloc] init];
+- (void)applyTextEdits:(NSArray *)texts {
+    if (!texts || texts.count == 0 || !_pagFile) return;
+    for (NSUInteger idx = 0; idx < texts.count; idx++) {
+        if ((int)idx >= [_pagFile numTexts]) break;
+        id item = texts[idx];
+        if (item == NSNull.null || ![item isKindOfClass:NSDictionary.class]) continue;
+        NSDictionary *map = (NSDictionary *)item;
+        PAGText *pagText = [_pagFile getTextData:(int)idx];
+        if (!pagText) continue;
+        if ([map[@"text"] isKindOfClass:NSString.class]) pagText.text = map[@"text"];
+        if (map[@"fontSize"] && map[@"fontSize"] != NSNull.null) pagText.fontSize = [map[@"fontSize"] floatValue];
+        if (map[@"fillColor"] && map[@"fillColor"] != NSNull.null) {
+            pagText.fillColor = [self colorFromARGB:[map[@"fillColor"] integerValue]];
+        }
+        if (map[@"strokeColor"] && map[@"strokeColor"] != NSNull.null) {
+            pagText.strokeColor = [self colorFromARGB:[map[@"strokeColor"] integerValue]];
+        }
+        if ([map[@"fontFamily"] isKindOfClass:NSString.class]) pagText.fontFamily = map[@"fontFamily"];
+        if ([map[@"fontStyle"] isKindOfClass:NSString.class]) pagText.fontStyle = map[@"fontStyle"];
+        [_pagFile replaceText:(int)idx data:pagText];
     }
-    [_player setComposition:_pagFile];
-    _surface = [PAGSurface MakeOffscreen:CGSizeMake(_pagFile.width, _pagFile.height)];
-    [_player setSurface:_surface];
-    [_player setProgress: _initProgress];
-    [_player flush];
-    _frameUpdateCallback();
+}
+
+- (instancetype)initWithPagData:(NSData*)pagData
+                       progress:(double)initProgress
+                         images:(nullable NSArray*)images
+                          texts:(nullable NSArray*)texts
+            frameUpdateCallback:(FrameUpdateCallback)frameUpdateCallback
+                  eventCallback:(PAGEventCallback)eventCallback
+{
+    if (self = [super init]) {
+        _frameUpdateCallback = frameUpdateCallback;
+        _eventCallback = eventCallback;
+        _initProgress = initProgress;
+        if(pagData){
+            _pagFile = [PAGFile Load:pagData.bytes size:pagData.length];
+            _player = [[PAGPlayer alloc] init];
+            [self applyImageEdits:images];
+            [self applyTextEdits:texts];
+            // 文字/图片替换完成后再绑定 composition，确保 PAG 内部 layout 包含最新替换内容
+            [_player setComposition:_pagFile];
+            _surface = [PAGSurface MakeFromGPU:CGSizeMake(_pagFile.width, _pagFile.height)];
+            [_player setSurface:_surface];
+            [_player setProgress:initProgress];
+            [_player flush];
+            // 有文字/图片替换时，部分设备首帧第一个文字图层右上角会被旧 clip 截断
+            // 需额外 flush 一次，让 PAG 用稳定的 layout 重新渲染
+            if ((images && images.count > 0) || (texts && texts.count > 0)) {
+                [_player flush];
+            }
+            _frameUpdateCallback();
+        }
+    }
+    return self;
+}
+
+- (instancetype)initWithPagData:(NSData*)pagData
+                       progress:(double)initProgress
+            frameUpdateCallback:(FrameUpdateCallback)frameUpdateCallback
+                  eventCallback:(PAGEventCallback)eventCallback
+{
+    return [self initWithPagData:pagData
+                        progress:initProgress
+                          images:nil
+                           texts:nil
+             frameUpdateCallback:frameUpdateCallback
+                   eventCallback:eventCallback];
 }
 
 - (void)startRender
@@ -191,39 +236,10 @@ static int64_t GetCurrentTimeUS() {
     _frameUpdateCallback();
 }
 
-- (void)invalidateDisplayLink {
+- (void)releaseRender{
     if (_displayLink) {
         [_displayLink invalidate];
         _displayLink = nil;
-    }
-}
-
-- (void)clearSurface {
-    if (_surface) {
-        if ([[TGFlutterWorkerExecutor sharedInstance] enableMultiThread]) {
-            @synchronized(self) {
-                if (_surface){
-                    [_surface freeCache];
-                    [_surface clearAll];
-                }
-            }
-        } else{
-            [_surface freeCache];
-            [_surface clearAll];
-        }
-    }
-}
-
-/// 清除Pagrender时序
-- (void)clearPagState {
-    if ([[TGFlutterWorkerExecutor sharedInstance] enableMultiThread]) {
-        @synchronized(self) {
-            start = -1;
-            _endEvent = NO;
-        }
-    } else{
-        start = -1;
-        _endEvent = NO;
     }
 }
 
@@ -231,7 +247,7 @@ static int64_t GetCurrentTimeUS() {
     _frameUpdateCallback = nil;
     _eventCallback = nil;
     _surface = nil;
-    _pagFile = nil;
-    _player = nil;
+    self.pagFile = nil;
+    self.player = nil;
 }
 @end

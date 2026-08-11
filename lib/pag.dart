@@ -1,7 +1,52 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+/// 图片图层替换数据，列表下标对应 PAGFile 可编辑图像的 index
+class PAGImageEdit {
+  /// 图片二进制数据（JPEG/PNG/WebP 等格式），传 null 表示跳过该位置
+  final Uint8List? bytes;
+
+  const PAGImageEdit(this.bytes);
+}
+
+/// 文字图层替换数据，列表下标对应 PAGFile 可编辑文字的 index
+class PAGTextEdit {
+  /// 替换的文字内容，传 null 表示跳过该位置
+  final String? text;
+
+  /// 字号（可选），单位 px
+  final double? fontSize;
+
+  /// 填充色（可选），0xAARRGGBB 格式
+  final int? fillColor;
+
+  /// 描边色（可选），0xAARRGGBB 格式
+  final int? strokeColor;
+
+  /// 字体 family（可选）
+  final String? fontFamily;
+
+  /// 字体 style（可选），如 "Bold"、"Italic"
+  final String? fontStyle;
+
+  const PAGTextEdit({
+    this.text,
+    this.fontSize,
+    this.fillColor,
+    this.strokeColor,
+    this.fontFamily,
+    this.fontStyle,
+  });
+
+  Map<String, Object?> toMap() => {
+        if (text != null) 'text': text,
+        if (fontSize != null) 'fontSize': fontSize,
+        if (fillColor != null) 'fillColor': fillColor,
+        if (strokeColor != null) 'strokeColor': strokeColor,
+        if (fontFamily != null) 'fontFamily': fontFamily,
+        if (fontStyle != null) 'fontStyle': fontStyle,
+      };
+}
 
 class PAGView extends StatefulWidget {
   /// 宽高，不建议不设置
@@ -44,17 +89,19 @@ class PAGView extends StatefulWidget {
   /// Notifies the repetition of the animation.
   final PAGCallback? onAnimationRepeat;
 
-  bool reuse;
-
-  final String? reuseKey;
-
   /// 加载失败时的默认控件构造器
   final Widget Function(BuildContext context)? defaultBuilder;
+
+  /// 初始化时替换的图片图层列表（可选）
+  final List<PAGImageEdit>? images;
+
+  /// 初始化时替换的文字图层列表（可选）
+  final List<PAGTextEdit>? texts;
 
   static const int REPEAT_COUNT_LOOP = -1; //无限循环
   static const int REPEAT_COUNT_DEFAULT = 1; //默认仅播放一次
 
-  PAGView.network(
+  const PAGView.network(
     this.url, {
     this.width,
     this.height,
@@ -67,16 +114,15 @@ class PAGView extends StatefulWidget {
     this.onAnimationCancel,
     this.onAnimationRepeat,
     this.defaultBuilder,
-    this.reuse = false,
-    String? reuseKey,
+    this.images,
+    this.texts,
     Key? key,
   })  : this.bytesData = null,
         this.assetName = null,
         this.package = null,
-        this.reuseKey = reuseKey ?? url,
         super(key: key);
 
-  PAGView.asset(
+  const PAGView.asset(
     this.assetName, {
     this.width,
     this.height,
@@ -90,15 +136,14 @@ class PAGView extends StatefulWidget {
     this.onAnimationCancel,
     this.onAnimationRepeat,
     this.defaultBuilder,
-    this.reuse = false,
-    String? reuseKey,
+    this.images,
+    this.texts,
     Key? key,
   })  : this.bytesData = null,
         this.url = null,
-        this.reuseKey = reuseKey ?? (package != null ? '$package$assetName' : assetName),
         super(key: key);
 
-  PAGView.bytes(
+  const PAGView.bytes(
     this.bytesData, {
     this.width,
     this.height,
@@ -112,11 +157,11 @@ class PAGView extends StatefulWidget {
     this.onAnimationCancel,
     this.onAnimationRepeat,
     this.defaultBuilder,
+    this.images,
+    this.texts,
     Key? key,
   })  : this.url = null,
         this.assetName = null,
-        this.reuseKey = null,
-        this.reuse = false,
         super(key: key);
 
   @override
@@ -126,15 +171,9 @@ class PAGView extends StatefulWidget {
 class PAGViewState extends State<PAGView> {
   bool _hasLoadTexture = false;
   int _textureId = -1;
-  bool _frameReady = false;
 
   double rawWidth = 0;
   double rawHeight = 0;
-
-  static int _instanceCounter = 0;
-  late final int instanceId;
-
-  static bool checkAvailable = true;
 
   static const double defaultSize = 50;
 
@@ -149,7 +188,6 @@ class PAGViewState extends State<PAGView> {
   static const String _nativeEnableCache = "enableCache";
   static const String _nativeSetCacheSize = "setCacheSize";
   static const String _nativeEnableMultiThread = "enableMultiThread";
-  static const String _nativeEnableReuse = "enableReuse";
 
   // 参数
   static const String _argumentTextureId = 'textureId';
@@ -169,11 +207,8 @@ class PAGViewState extends State<PAGView> {
   static const String _argumentCacheEnabled = "cacheEnabled";
   static const String _argumentCacheSize = "cacheSize";
   static const String _argumentMultiThreadEnabled = "multiThreadEnabled";
-  static const String _argumentReuse = "reuse";
-  static const String _argumentReuseKey = "reuseKey";
-  static const String _argumentViewId = "viewId";
-  static const String _argumentReuseEnabled = "reuseEnabled";
-  static const String _argumentFrameAvailable = "frameAvailable";
+  static const String _argumentImages = "images";
+  static const String _argumentTexts = "texts";
 
   // 监听该函数
   static const String _playCallback = 'PAGCallback';
@@ -182,45 +217,23 @@ class PAGViewState extends State<PAGView> {
   static const String _eventCancel = 'onAnimationCancel';
   static const String _eventRepeat = 'onAnimationRepeat';
   static const String _eventUpdate = 'onAnimationUpdate';
-  static const String _eventFrameReady = 'onFrameReady';
 
   // 回调监听
-  static MethodChannel get _channel => (const MethodChannel('flutter_pag_plugin')
+  static MethodChannel _channel = (const MethodChannel('flutter_pag_plugin')
     ..setMethodCallHandler((result) {
       if (result.method == _playCallback) {
-        final map = callbackHandlers[result.arguments[_argumentTextureId]];
-        if (map != null) {
-          for (var entry in map.entries) {
-            entry.value?.call(result.arguments[_argumentEvent]);
-          }
-        }
-        // callbackHandlers[result.arguments[_argumentTextureId]]?.call(result.arguments[_argumentEvent]);
-        if (result.arguments[_argumentEvent] == _eventFrameReady) {
-          frameReadyHandlers[result.arguments[_argumentViewId]]?.call();
-        }
+        callbackHandlers[result.arguments[_argumentTextureId]]?.call(result.arguments[_argumentEvent]);
       }
 
       return Future<dynamic>.value();
     }));
 
-  static Map<int, Map<int, Function(String event)?>?> callbackHandlers = {};
-  static Map<int, Function()> frameReadyHandlers = {};
+  static Map<int, Function(String event)?> callbackHandlers = {};
 
   @override
   void initState() {
     super.initState();
-    instanceId = _instanceCounter++;
-    frameReadyHandlers[instanceId] = () {
-      setState(() {
-        _frameReady = true;
-      });
-    };
     newTexture();
-  }
-
-  bool _isAvailable() {
-    if (!checkAvailable || !Platform.isAndroid) return true;
-    return _frameReady;
   }
 
   // 初始化
@@ -229,18 +242,8 @@ class PAGViewState extends State<PAGView> {
     double initProcess = widget.initProgress < 0 ? 0 : widget.initProgress;
 
     try {
-      dynamic result = await _channel.invokeMethod(_nativeInit, {
-        _argumentAssetName: widget.assetName,
-        _argumentPackage: widget.package,
-        _argumentUrl: widget.url,
-        _argumentBytes: widget.bytesData,
-        _argumentRepeatCount: repeatCount,
-        _argumentInitProgress: initProcess,
-        _argumentAutoPlay: widget.autoPlay,
-        _argumentReuse: widget.reuse,
-        _argumentReuseKey: widget.reuseKey,
-        _argumentViewId: instanceId,
-      });
+      dynamic result =
+          await _channel.invokeMethod(_nativeInit, {_argumentAssetName: widget.assetName, _argumentPackage: widget.package, _argumentUrl: widget.url, _argumentBytes: widget.bytesData, _argumentRepeatCount: repeatCount, _argumentInitProgress: initProcess, _argumentAutoPlay: widget.autoPlay, _argumentImages: widget.images?.map((e) => e.bytes).toList(), _argumentTexts: widget.texts?.map((e) => e.toMap()).toList()});
       if (result is Map) {
         _textureId = result[_argumentTextureId];
         rawWidth = result[_argumentWidth] ?? 0;
@@ -252,22 +255,21 @@ class PAGViewState extends State<PAGView> {
         });
         widget.onInit?.call();
       } else {
-        notifyRelease();
+        _channel.invokeMethod(_nativeRelease, {_argumentTextureId: _textureId});
       }
     } catch (e) {
       print('PAGViewState error: $e');
     }
 
     // 事件回调
-    if (_textureId >= 0 && mounted) {
+    if (_textureId >= 0) {
       var events = <String, PAGCallback?>{
         _eventStart: widget.onAnimationStart,
         _eventEnd: widget.onAnimationEnd,
         _eventCancel: widget.onAnimationCancel,
         _eventRepeat: widget.onAnimationRepeat,
       };
-      if (!callbackHandlers.containsKey(_textureId)) callbackHandlers[_textureId] = {};
-      callbackHandlers[_textureId]?[instanceId] = (event) {
+      callbackHandlers[_textureId] = (event) {
         events[event]?.call();
       };
     }
@@ -313,32 +315,14 @@ class PAGViewState extends State<PAGView> {
     return (await _channel.invokeMethod(_nativeGetPointLayer, {_argumentTextureId: _textureId, _argumentPointX: x, _argumentPointY: y}) as List).map((e) => e.toString()).toList();
   }
 
-  void notifyRelease() {
-    _channel.invokeMethod(_nativeRelease, {
-      _argumentTextureId: _textureId,
-      _argumentReuse: widget.reuse,
-      _argumentReuseKey: widget.reuseKey,
-      _argumentViewId: instanceId,
-      _argumentFrameAvailable: _isAvailable(),
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_hasLoadTexture) {
-      if (_isAvailable()) {
-        return SizedBox (
-          width: widget.width ?? (rawWidth / 2),
-          height: widget.height ?? (rawHeight / 2),
-          child: Texture(textureId: _textureId),
-        );
-      } else {
-        return widget.defaultBuilder?.call(context) ?? SizedBox(
-          width: widget.width ?? (rawWidth / 2),
-          height: widget.height ?? (rawHeight / 2),
-        );
-      }
-
+      return SizedBox(
+        width: widget.width ?? (rawWidth / 2),
+        height: widget.height ?? (rawHeight / 2),
+        child: Texture(textureId: _textureId),
+      );
     } else {
       return widget.defaultBuilder?.call(context) ??
           SizedBox(
@@ -351,12 +335,8 @@ class PAGViewState extends State<PAGView> {
   @override
   void dispose() {
     super.dispose();
-    notifyRelease();
-    callbackHandlers[_textureId]?.remove(instanceId);
-    if (callbackHandlers[_textureId] != null && callbackHandlers[_textureId]!.isEmpty) {
-      callbackHandlers.remove(_textureId);
-    }
-    frameReadyHandlers.remove(instanceId);
+    _channel.invokeMethod(_nativeRelease, {_argumentTextureId: _textureId});
+    callbackHandlers.remove(_textureId);
   }
 }
 
@@ -377,13 +357,5 @@ class PAG {
   // 设置缓存数量，默认10
   static void setCacheSize(int size) {
     PAGViewState._channel.invokeMethod(PAGViewState._nativeSetCacheSize, {PAGViewState._argumentCacheSize: size});
-  }
-
-  static void enableReuse(bool enable) {
-    PAGViewState._channel.invokeMethod(PAGViewState._nativeEnableReuse, {PAGViewState._argumentReuseEnabled: enable});
-  }
-
-  static void enableCheckAvailable(bool enable) {
-    PAGViewState.checkAvailable = enable;
   }
 }
